@@ -188,8 +188,7 @@ class AsyncUaClient(object):
     def set_security(self, policy):
         self._security_policy = policy
 
-    @coroutine
-    def connect_socket(self, host, port):
+    async def connect_socket(self, host, port):
         """
         connect to server socket and start receiving thread
         """
@@ -198,7 +197,7 @@ class AsyncUaClient(object):
         self._proto = UAClientProtocol(self._connection, self._disconn_cb)
         loop = uaasync.get_loop()
         coro = loop.create_connection(lambda: self._proto, host, port)
-        yield From(coro)
+        await coro
         self._proto_connected = True
 
     def _disconn_cb(self, ex):
@@ -224,8 +223,7 @@ class AsyncUaClient(object):
             hdr = ua.ResponseHeader.from_binary(data)
             hdr.ServiceResult.check()
 
-    @coroutine
-    def _send_request(self, request, timeout=None):
+    async def _send_request(self, request, timeout=None):
         if not self._proto_connected:
             raise ua.UaError("client is disconnected")
         reqname = request.__class__.__name__
@@ -233,33 +231,30 @@ class AsyncUaClient(object):
         if timeout is None:
             timeout = self._timeout
         fut = self._proto.send_request(request, timeout)
-        data = yield From(fut)
-        # data = yield From(uaasync.wait_for(fut, self._timeout * 1.1))
+        data = await fut
+        # data = await uaasync.wait_for(fut, self._timeout * 1.1)
         self._check_answer(data, reqname)
-        raise Return(data)
+        return data
 
     def send_request(self, request):
         return self._send_request(request)
 
-    @coroutine
-    def send_hello(self, url):
+    async def send_hello(self, url):
         hello = ua.Hello()
         hello.EndpointUrl = url
-        ack = yield From(self._send_request(hello))
-        raise Return(ack)
+        ack = await self._send_request(hello)
+        return ack
 
-    @coroutine
-    def open_secure_channel(self, params):
+    async def open_secure_channel(self, params):
         request = ua.OpenSecureChannelRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.OpenSecureChannelResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
         self._connection.set_security_token(response.Parameters.SecurityToken)
-        raise Return(response.Parameters)
+        return response.Parameters
 
-    @coroutine
-    def close_secure_channel(self):
+    async def close_secure_channel(self):
         """
         close secure channel. It seems to trigger a shutdown of socket
         in most servers, so be prepare to reconnect.
@@ -268,54 +263,49 @@ class AsyncUaClient(object):
         """
         reqeust = ua.CloseSecureChannelRequest()
         try:
-            yield From(self._send_request(reqeust))
+            await self._send_request(reqeust)
         except uaasync.asyncio.CancelledError:
             # some servers send a response here, most do not ... so we ignore
             pass
 
-    @coroutine
-    def create_session(self, parameters):
+    async def create_session(self, parameters):
         request = ua.CreateSessionRequest()
         request.Parameters = parameters
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.CreateSessionResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
         self._proto.set_authentication_token(response.Parameters.AuthenticationToken)
-        raise Return(response.Parameters)
+        return response.Parameters
 
-    @coroutine
-    def activate_session(self, parameters):
+    async def activate_session(self, parameters):
         request = ua.ActivateSessionRequest()
         request.Parameters = parameters
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.ActivateSessionResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Parameters)
+        return response.Parameters
 
-    @coroutine
-    def close_session(self, deletesubscriptions):
+    async def close_session(self, deletesubscriptions):
         request = ua.CloseSessionRequest()
         request.DeleteSubscriptions = deletesubscriptions
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         ua.CloseSessionResponse.from_binary(data)
         # disabled, it seems we sent wrong session Id,
         # but where is the sessionId supposed to be sent???
         # response.ResponseHeader.ServiceResult.check()
 
-    @coroutine
-    def browse(self, parameters):
+    async def browse(self, parameters):
         request = ua.BrowseRequest()
         request.Parameters = parameters
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.BrowseResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def read(self, parameters):
+    async def read(self, parameters):
         request = ua.ReadRequest()
         request.Parameters = parameters
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.ReadResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
         # cast to Enum attributes that need to
@@ -328,109 +318,99 @@ class AsyncUaClient(object):
                 dv = response.Results[idx]
                 if dv.StatusCode.is_good() and dv.Value.Value in (-3, -2, -1, 0, 1, 2, 3, 4):
                     dv.Value.Value = ua.ValueRank(dv.Value.Value)
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def write(self, params):
+    async def write(self, params):
         request = ua.WriteRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.WriteResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def get_endpoints(self, params):
+    async def get_endpoints(self, params):
         request = ua.GetEndpointsRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.GetEndpointsResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Endpoints)
+        return response.Endpoints
 
-    @coroutine
-    def find_servers(self, params):
+    async def find_servers(self, params):
         request = ua.FindServersRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.FindServersResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Servers)
+        return response.Servers
 
-    @coroutine
-    def find_servers_on_network(self, params):
+    async def find_servers_on_network(self, params):
         request = ua.FindServersOnNetworkRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.FindServersOnNetworkResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Parameters)
+        return response.Parameters
 
-    @coroutine
-    def register_server(self, registered_server):
+    async def register_server(self, registered_server):
         request = ua.RegisterServerRequest()
         request.Server = registered_server
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.RegisterServerResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
 
-    @coroutine
-    def register_server2(self, params):
+    async def register_server2(self, params):
         request = ua.RegisterServer2Request()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.RegisterServer2Response.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.ConfigurationResults)
+        return response.ConfigurationResults
 
-    @coroutine
-    def translate_browsepaths_to_nodeids(self, browsepaths):
+    async def translate_browsepaths_to_nodeids(self, browsepaths):
         request = ua.TranslateBrowsePathsToNodeIdsRequest()
         request.Parameters.BrowsePaths = browsepaths
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.TranslateBrowsePathsToNodeIdsResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def create_subscription(self, params, callback):
+    async def create_subscription(self, params, callback):
         request = ua.CreateSubscriptionRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.CreateSubscriptionResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
         self._publishcallbacks[response.Parameters.SubscriptionId] = callback
-        raise Return(response.Parameters)
+        return response.Parameters
 
-    @coroutine
-    def delete_subscriptions(self, subscriptionids):
+    async def delete_subscriptions(self, subscriptionids):
         request = ua.DeleteSubscriptionsRequest()
         request.Parameters.SubscriptionIds = subscriptionids
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.DeleteSubscriptionsResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
         for sid in subscriptionids:
             self._publishcallbacks.pop(sid)
-        raise Return(response.Results)
+        return response.Results
 
     def publish(self, acks=None):
         uaasync.ensure_future(self._do_publish(acks))
 
-    @coroutine
-    def _do_publish(self, acks):
+    async def _do_publish(self, acks):
         if acks is None:
             acks = []
         request = ua.PublishRequest()
         request.Parameters.SubscriptionAcknowledgements = acks
         try:
-            data = yield From(self._send_request(request, int(9e5)))
+            data = await self._send_request(request, int(9e5))
         except uaasync.asyncio.CancelledError:
-            raise Return()
+            return
         except Exception:
             self.logger.exception("Error receving publish response")
             # send publish request to server so the server does not stop sending notifications
             self.publish([])
-            raise Return()
+            return
 
         try:
             response = ua.PublishResponse.from_binary(data)
@@ -438,69 +418,63 @@ class AsyncUaClient(object):
             self.logger.exception("Error parsing notificatipn from server")
             # send publish request to server so the server does not stop sending notifications
             self.publish([])
-            raise Return()
+            return
         if response.Parameters.SubscriptionId not in self._publishcallbacks:
             self.logger.warning("Received data for unknown subscription: %s ", response.Parameters.SubscriptionId)
-            raise Return()
+            return
         callback = self._publishcallbacks[response.Parameters.SubscriptionId]
         try:
             callback(response.Parameters)
         except Exception:  # we call client code, catch everything!
             self.logger.exception("Exception while calling user callback")
 
-    @coroutine
-    def create_monitored_items(self, params):
+    async def create_monitored_items(self, params):
         request = ua.CreateMonitoredItemsRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.CreateMonitoredItemsResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def delete_monitored_items(self, params):
+    async def delete_monitored_items(self, params):
         request = ua.DeleteMonitoredItemsRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.DeleteMonitoredItemsResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def add_nodes(self, nodestoadd):
+    async def add_nodes(self, nodestoadd):
         request = ua.AddNodesRequest()
         request.Parameters.NodesToAdd = nodestoadd
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.AddNodesResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def delete_nodes(self, nodestodelete):
+    async def delete_nodes(self, nodestodelete):
         request = ua.DeleteNodesRequest()
         request.Parameters.NodesToDelete = nodestodelete
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.DeleteNodesResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def call(self, methodstocall):
+    async def call(self, methodstocall):
         request = ua.CallRequest()
         request.Parameters.MethodsToCall = methodstocall
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.CallResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
-    @coroutine
-    def history_read(self, params):
+    async def history_read(self, params):
         request = ua.HistoryReadRequest()
         request.Parameters = params
-        data = yield From(self._send_request(request))
+        data = await self._send_request(request)
         response = ua.HistoryReadResponse.from_binary(data)
         response.ResponseHeader.ServiceResult.check()
-        raise Return(response.Results)
+        return response.Results
 
 
 class UaClient(AsyncUaClient):
